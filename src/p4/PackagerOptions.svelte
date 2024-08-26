@@ -8,7 +8,6 @@
   import CustomExtensions from '../p4/CustomExtensions.svelte';
   import LearnMore from './LearnMore.svelte';
   import ColorPicker from './ColorPicker.svelte';
-  import Downloads from './Downloads.svelte';
   import writablePersistentStore from './persistent-store';
   import fileStore from './file-store';
   import {progress, currentTask, error} from './stores';
@@ -16,12 +15,6 @@
   import deepClone from './deep-clone';
   import Packager from '../packager/web/export';
   import Task from './task';
-  import downloadURL from './download-url';
-  import {recursivelySerializeBlobs, recursivelyDeserializeBlobs} from './blob-serializer';
-  import {readAsText} from '../common/readers';
-  import merge from './merge';
-  import DropArea from './DropArea.svelte';
-  import {APP_NAME} from '../packager/brand';
 
   export let projectData;
   export let title;
@@ -40,14 +33,7 @@
   }
   defaultOptions.app.packageName = Packager.getDefaultPackageNameFromFileName(projectData.title);
   defaultOptions.app.windowTitle = Packager.getWindowTitleFromFileName(projectData.title);
-  defaultOptions.extensions = projectData.project.analysis.extensions;
   const options = writablePersistentStore(`PackagerOptions.${projectData.uniqueId}`, defaultOptions);
-
-  // Compatibility with https://github.com/TurboWarp/packager/commit/f66199abd1c896c11aa69247275a1594fdfc95b8
-  $options.extensions = $options.extensions.map(i => {
-    if (typeof i === 'object' && i) return i.url || '';
-    return i;
-  });
 
   const hasMagicComment = (magic) => projectData.project.analysis.stageComments.find(
     (text) => text.split('\n').find((line) => line.endsWith(magic))
@@ -79,13 +65,6 @@
 
   $: title = $options.app.windowTitle;
 
-  const setOptions = (newOptions) => {
-    $options = newOptions;
-    $icon = $options.app.icon;
-    $customCursorIcon = $options.cursor.custom;
-    $loadingScreenImage = $options.loadingScreen.image;
-  };
-
   const otherEnvironmentsInitiallyOpen = ![
     'html',
     'zip',
@@ -93,18 +72,6 @@
     'webview-mac',
     'electron-linux64'
   ].includes($options.target);
-
-  const advancedOptionsInitiallyOpen = (
-    $options.compiler.enabled !== defaultOptions.compiler.enabled ||
-    $options.compiler.warpTimer !== defaultOptions.compiler.warpTimer ||
-    $options.extensions.length !== 0 ||
-    $options.bakeExtensions !== defaultOptions.bakeExtensions ||
-    $options.custom.css !== '' ||
-    $options.custom.js !== '' ||
-    $options.projectId !== defaultOptions.projectId ||
-    $options.packagedRuntime !== defaultOptions.packagedRuntime ||
-    $options.maxTextureDimension !== defaultOptions.maxTextureDimension
-  );
 
   const automaticallyCenterCursor = () => {
     const icon = $customCursorIcon;
@@ -128,6 +95,15 @@
     image.src = url;
   };
 
+  const downloadURL = (filename, url) => {
+    const link = document.createElement('a');
+    link.download = filename;
+    link.href = url;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  };
+
   const runPackager = async (task, options) => {
     const packager = new Packager();
     packager.options = options;
@@ -139,10 +115,6 @@
 
     task.setProgressText($_('progress.loadingScripts'));
 
-    packager.addEventListener('fetch-extensions', ({detail}) => {
-      task.setProgressText($_('progress.downloadingExtensions'));
-      task.setProgress(detail.progress);
-    });
     packager.addEventListener('large-asset-fetch', ({detail}) => {
       let thing;
       if (detail.asset.startsWith('nwjs-')) {
@@ -151,8 +123,6 @@
         thing = 'Electron';
       } else if (detail.asset === 'webview-mac') {
         thing = 'WKWebView';
-      } else if (detail.asset === 'steamworks.js') {
-        thing = 'Steamworks.js';
       }
       if (thing) {
         task.setProgressText($_('progress.loadingLargeAsset').replace('{thing}', thing));
@@ -219,54 +189,6 @@
     }
   };
 
-  const exportOptions = async () => {
-    const exported = await recursivelySerializeBlobs($options);
-    const blob = new Blob([JSON.stringify(exported)], {
-      type: 'application/json'
-    });
-    const url = URL.createObjectURL(blob);
-    const formattedAppName = APP_NAME
-      .replace(/[^a-z0-9 ]/gi, '')
-      .replace(/ /g, '-')
-      .toLowerCase();
-    downloadURL(`${formattedAppName}-settings.json`, url);
-    URL.revokeObjectURL(url);
-  };
-    
-  const importOptions = async () => {
-    const input = document.createElement("input");
-    input.type = 'file';
-    input.accept = '.json';
-    input.addEventListener('change', (e) => {
-      importOptionsFromDataTransfer(e.target);
-    });
-    document.body.appendChild(input);
-    input.click();
-    input.remove();
-  };
-
-  const importOptionsFromDataTransfer = async (dataTransfer) => {
-    const file = dataTransfer.files[0];
-    if (!file) {
-      // Should never happen.
-      return;
-    }
-    try {
-      const text = await readAsText(file);
-      const parsed = JSON.parse(text);
-      const deserialized = recursivelyDeserializeBlobs(parsed);
-      const copiedDefaultOptions = deepClone(defaultOptions);
-      const mergedWithDefaults = merge(deserialized, copiedDefaultOptions);
-
-      const isUnsafe = Packager.usesUnsafeOptions(mergedWithDefaults);
-      if (!isUnsafe || confirm($_('options.confirmImportUnsafe'))) {
-        setOptions(mergedWithDefaults);
-      }
-    } catch (e) {
-      $error = e;
-    }
-  };
-
   onDestroy(() => {
     if (result) {
       URL.revokeObjectURL(result.url);
@@ -303,15 +225,16 @@
   input[type="number"] {
     width: 50px;
   }
-  input:invalid, .version:placeholder-shown {
+  input:invalid {
     outline: 2px solid red;
   }
   .warning {
     font-weight: bold;
     background: yellow;
     color: black;
-    padding: 10px;
-    border-radius: 10px;
+    padding: 12px;
+    border-radius: 12px;
+    margin: 12px 0;
   }
   .buttons {
     display: flex;
@@ -319,8 +242,7 @@
   .button {
     margin-right: 4px;
   }
-  .side-buttons {
-    display: flex;
+  .reset-button {
     margin-left: auto;
   }
 </style>
@@ -413,10 +335,6 @@
         {$_('options.customUsernameWarning')}
       </p>
     {/if}
-    <label class="option">
-      <input type="checkbox" bind:checked={$options.closeWhenStopped}>
-      {$_('options.closeWhenStopped')}
-    </label>
 
     <h3>{$_('options.stage')}</h3>
     <label class="option">
@@ -551,11 +469,6 @@
       <ColorPicker bind:value={$options.monitors.variableColor} />
       {$_('options.variableColor')}
     </label>
-    <!-- svelte-ignore a11y-label-has-associated-control -->
-    <label class="option">
-      <ColorPicker bind:value={$options.monitors.listColor} />
-      {$_('options.listColor')}
-    </label>
   </div>
 </Section>
 
@@ -609,7 +522,7 @@
         <input type="checkbox" bind:checked={$options.chunks.pointerlock}>
         {$_('options.pointerlock')}
       </label>
-      <a href="https://experiments.turbowarp.org/pointerlock/" target="_blank" rel="noopener noreferrer">
+      <a href="https://experiments.turbowarp.org/pointerlock/" target="_blank" rel="noopener">
         {$_('options.pointerlockHelp')}
       </a>
     </div>
@@ -619,7 +532,7 @@
         <input type="checkbox" bind:checked={$options.chunks.gamepad}>
         {$_('options.gamepad')}
       </label>
-      <a href="https://turbowarp.org/addons#gamepad" target="_blank" rel="noopener noreferrer">
+      <a href="https://turbowarp.org/addons#gamepad" target="_blank" rel="noopener">
         {$_('options.gamepadHelp')}
       </a>
     </div>
@@ -667,10 +580,7 @@
         <div transition:fade|local>
           <label class="option">
             {$_('options.cloudVariablesHost')}
-            <!-- Examples of valid values: -->
-            <!-- wss://clouddata.turbowarp.org -->
-            <!-- ws:localhost:8080 -->
-            <input type="text" bind:value={$options.cloudVariables.cloudHost} pattern="wss?:.*">
+            <input type="text" bind:value={$options.cloudVariables.cloudHost}>
           </label>
         </div>
       {/if}
@@ -711,16 +621,14 @@
     resetOptions([
       'compiler',
       'extensions',
-      'bakeExtensions',
       'custom',
-      'projectId',
-      'maxTextureDimension'
+      'projectId'
     ]);
   }}
 >
   <div>
     <h2>{$_('options.advancedOptions')}</h2>
-    <details open={advancedOptionsInitiallyOpen}>
+    <details>
       <summary>{$_('options.advancedSummary')}</summary>
 
       <div class="option">
@@ -745,12 +653,6 @@
         <!-- TODO: use the user-facing documentation when that becomes available -->
         <LearnMore slug="development/custom-extensions" />
         <CustomExtensions bind:extensions={$options.extensions} />
-        <p class="warning">{$_('options.customExtensionsSecurity')}</p>
-      </label>
-
-      <label class="option">
-        <input type="checkbox" bind:checked={$options.bakeExtensions}>
-        {$_('options.bakeExtensions')}
       </label>
 
       <label class="option">
@@ -767,18 +669,6 @@
         <input type="text" bind:value={$options.projectId}>
       </label>
       <p>{$_('options.projectIdHelp')}</p>
-
-      <label class="option">
-        <input type="checkbox" bind:checked={$options.packagedRuntime} />
-        {$_('options.packagedRuntime')}
-      </label>
-
-      <label class="option">
-        <input type="checkbox" checked={$options.maxTextureDimension !== defaultOptions.maxTextureDimension} on:change={(e) => {
-          $options.maxTextureDimension = defaultOptions.maxTextureDimension * (e.target.checked ? 2 : 1);
-        }} />
-        {$_('options.maxTextureDimension')}
-      </label>
     </details>
   </div>
 </Section>
@@ -820,6 +710,13 @@
       </label>
     </div>
 
+    <div class="group">
+      <label class="option">
+        <input type="radio" name="environment" bind:group={$options.target} value="android">
+        {$_('options.application-android')}
+      </label>
+    </div>
+
     <details open={otherEnvironmentsInitiallyOpen}>
       <summary>{$_('options.otherEnvironments')}</summary>
       <p>{$_('options.otherEnvironmentsHelp')}</p>
@@ -834,24 +731,7 @@
           <input type="radio" name="environment" bind:group={$options.target} value="electron-win64">
           {$_('options.application-win64').replace('{type}', 'Electron')}
         </label>
-        <label class="option">
-          <input type="radio" name="environment" bind:group={$options.target} value="electron-win-arm">
-          {$_('options.application-win-arm').replace('{type}', 'Electron')}
-        </label>
-        <label class="option">
-          <input type="radio" name="environment" bind:group={$options.target} value="electron-mac">
-          {$_('options.application-mac').replace('{type}', 'Electron')}
-        </label>
-        <label class="option">
-          <input type="radio" name="environment" bind:group={$options.target} value="electron-linux-arm32">
-          {$_('options.application-linux-arm32').replace('{type}', 'Electron')}
-        </label>
-        <label class="option">
-          <input type="radio" name="environment" bind:group={$options.target} value="electron-linux-arm64">
-          {$_('options.application-linux-arm64').replace('{type}', 'Electron')}
-        </label>  
       </div>
-
       <div class="group">
         <label class="option">
           <input type="radio" name="environment" bind:group={$options.target} value="nwjs-win32">
@@ -881,8 +761,7 @@
       reset={$options.target.startsWith('zip') ? null : () => {
         resetOptions([
           'app.packageName',
-          'app.windowMode',
-          'app.escapeBehavior'
+          'app.windowMode'
         ]);
       }}
     >
@@ -894,43 +773,25 @@
           <h2>{$_('options.applicationSettings')}</h2>
           <label class="option">
             {$_('options.packageName')}
-            <input type="text" bind:value={$options.app.packageName} pattern="[\w \-]+" minlength="1">
+            <input type="text" bind:value={$options.app.packageName} pattern="[a-zA-Z -]+" minlength="1">
           </label>
           <p>{$_('options.packageNameHelp')}</p>
 
-          <label class="option">
-            {$_('options.version')}
-            <input type="text" class="version" bind:value={$options.app.version} pattern="\d+\.\d+\.\d+" placeholder="1.0.0" minlength="1">
-          </label>
-          <p>{$_('options.versionHelp')}</p>
-
           {#if $options.target.includes('electron')}
-            <label class="option">
-              {$_('options.initalWindowSize')}
-              <select bind:value={$options.app.windowMode}>
-                <option value="window">{$_('options.startWindow')}</option>
-                <option value="maximize">{$_('options.startMaximized')}</option>
-                <option value="fullscreen">{$_('options.startFullscreen')}</option>
-              </select>
-            </label>
-
-            <label class="option">
-              {$_('options.escapeBehavior')}
-              <select bind:value={$options.app.escapeBehavior}>
-                <option value="unfullscreen-only">{$_('options.unFullscreenOnly')}</option>
-                <option value="exit-only">{$_('options.exitOnly')}</option>
-                <option value="unfullscreen-or-exit">{$_('options.unFullscreenOrExit')}</option>
-                <option value="nothing">{$_('options.doNothing')}</option>
-              </select>
-            </label>
-
-            <label class="option">
-              {$_('options.windowControls')}
-              <select bind:value={$options.app.windowControls}>
-                <option value="default">{$_('options.defaultControls')}</option>
-                <option value="frameless">{$_('options.noControls')}</option>
-              </select>
-            </label>
+            <div class="group">
+              <label class="option">
+                <input type="radio" name="app-window-mode" bind:group={$options.app.windowMode} value="window">
+                {$_('options.startWindow')}
+              </label>
+              <label class="option">
+                <input type="radio" name="app-window-mode" bind:group={$options.app.windowMode} value="maximize">
+                {$_('options.startMaximized')}
+              </label>
+              <label class="option">
+                <input type="radio" name="app-window-mode" bind:group={$options.app.windowMode} value="fullscreen">
+                {$_('options.startFullscreen')}
+              </label>
+            </div>
           {/if}
 
           <div class="warning">
@@ -947,134 +808,175 @@
           {#if $options.target.includes('win')}
             <div>
               <h2>Windows</h2>
-              <p>All Windows applications generated by this site are unsigned, so users will see SmartScreen warnings when they try to run it for the first time. They can bypass these warnings by pressing "More info" then "Run anyways".</p>
               <p>To change the icon of the executable file or create an installer program, download and run <a href="https://github.com/TurboWarp/packager-extras/releases">TurboWarp Packager Extras</a> and select the output of this website.</p>
+              <p>All Windows applications generated by this site are unsigned, so users may see SmartScreen warnings when they try to launch it for the first time.</p>
+              {#if $options.target.includes('nwjs')}
+                <p class="warning">NW.js support is deprecated and may be removed in the future. Use Electron instead if possible.</p>
+              {/if}
+              {#if $options.target.endsWith('64')}
+                <p>The application will only run on 64-bit x86 computers.</p>
+              {:else if $options.target.endsWith('32')}
+                <p>The application will run on 32-bit and 64-bit x86 computers.</p>
+                <p>If your project is very large and crashes often, use 64-bit only mode instead (in Other environments) as it can access more memory.</p>
+              {/if}
             </div>
           {:else if $options.target.includes('mac')}
-            <div>
-              <h2>macOS</h2>
-              <p>Due to Apple policy, packaging for their platforms is troublesome. You either have to:</p>
-              <ul>
-                <li>Instruct users to ignore scary Gatekeeper warnings by opening Finder > Navigating to the application > Right click > Open > Open. This website generates applications that require this workaround.</li>
-                <li>Or pay Apple $100/year for a developer account to sign and notarize the app (very involved process; reach out in feedback for more information)</li>
-              </ul>
-            </div>
-          {:else if $options.target.includes('linux')}
-            <div>
-              <h2>Linux</h2>
-              <p>Linux support is still experimental.</p>
-            </div>
-          {/if}
-
-          {#if $options.target.includes('electron')}
-            <div>
-              <h2>Electron</h2>
-              <p>The Electron environment works by embedding a copy of Chromium (the open source part of Google Chrome) along with your project, which means the app will be very large.</p>
-
-              {#if $options.target.includes('win')}
-                {#if $options.target.includes('32')}
-                  <p>Note: You have selected the 32-bit or 64-bit mode. This maximizes device compatibility but limits the amount of memory the app can use. If you encounter crashes, try going into "Other environments" and using the 64-bit only mode instead.</p>
-                {/if}
-              {:else if $options.target.includes('mac')}
-                <p>On macOS, the app will run natively on both Intel Silicon and Apple Silicon Macs.</p>
-              {:else if $options.target.includes('linux')}
-                <p>On Linux, the application can be started by running <code>start.sh</code></p>
-              {/if}
-            </div>
-          {:else if $options.target.includes('nwjs')}
-            <div>
-              <h2>NW.js</h2>
-              <p class="warning">NW.js support is deprecated and may be removed in the future. Use the Electron environments instead. They're better in every way.</p>
-              <p>The NW.js environment works by embedding a copy of Chromium (the open source part of Google Chrome) along with your project, which means the app will be very large.</p>
-              <p>For further help and steps, see <a href="https://docs.nwjs.io/en/latest/For%20Users/Package%20and%20Distribute/#linux">NW.js Documentation</a>.</p>
-              {#if $options.target.includes('mac')}
-                <p>On macOS, the app will run using Rosetta on Apple Silicon Macs.</p>
-              {/if}
-            </div>
-          {:else if $options.target.includes('webview-mac')}
-            <div>
+            <h2>macOS</h2>
+            <p>Due to Apple policy, packaging for their platforms is troublesome. You either have to:</p>
+            <ul>
+              <li>Instruct users to ignore scary Gatekeeper warnings by opening Finder > Navigating to the application > Right click > Open > Open. This website generates applications that require this workaround.</li>
+              <li>Or pay Apple $100/year for a developer account to sign and notarize the app (very involved process; reach out in feedback for more information)</li>
+            </ul>
+            {#if $options.target.includes('webview')}
               <h2>WKWebView</h2>
-              <p>WKWebView is the preferred way to package for macOS. It will be hundreds of MB smaller than the other macOS-specific environments and typically run the fastest.</p>
-              <p>The app will run natively on both Intel and Apple silicon Macs running macOS 10.13 or later.</p>
+              <p>WKWebView is the fastest and smallest way to package for macOS. It should run natively (without Rosetta) on both Intel and Apple silicon Macs running macOS 10.12 or later.</p>
               <p>Note that:</p>
               <ul>
-                <li>Video sensing and loudness blocks will only work in macOS 12 or later.</li>
-                <li>Pointer lock will not work.</li>
-                <li>Extremely large projects might not work properly.</li>
+                <li>Video sensing and loudness blocks will not work</li>
+                <li>Extremely memory intensive projects may not work well</li>
               </ul>
-              <p>Use the "Electron macOS Application" (inside Other environments) or "Plain HTML" environments instead if you encounter these issues.</p>
+              <p>Use "Plain HTML" or "NW.js macOS Application" if these are problems for your project.</p>
+            {:else if $options.target.includes('nwjs')}
+              <h2>NW.js</h2>
+              <p>NW.js runs natively on Intel Macs but will use Rosetta on Apple silicon Macs.</p>
+              <p>For further help and steps, see <a href="https://docs.nwjs.io/en/latest/For%20Users/Package%20and%20Distribute/#mac-os-x">NW.js Documentation</a>.</p>
+            {/if}
+          {:else if $options.target.includes('linux')}
+            <h2>Linux</h2>
+            <p>Linux support is still experimental.</p>
+            <p>The application will only run on 64-bit x86 computers. 32-bit computers, Raspberry Pis, and other ARM devices will not work.</p>
+            {#if $options.target.includes('electron')}
+              <p>The application is started by running <code>start.sh</code>.</p>
+            {:else if $options.target.includes('nwjs')}
+              <p class="warning">NW.js support is deprecated and may be removed in the future. Use Electron instead if possible.</p>
+              <p>For further help and steps, see <a href="https://docs.nwjs.io/en/latest/For%20Users/Package%20and%20Distribute/#linux">NW.js Documentation</a>.</p>
+            {/if}
+          {:else if $options.target === 'android'}
+            <h2>Android</h2>
+
+            <div class="warning">
+              Unlike the other environments, Android support is not fully automated. You must manually create an app. This section will try to guide you through the process.
             </div>
+
+            <p>This section assumes you have full access (including adminstrator/root) to a Windows, macOS, or Linux computer.</p>
+            <p>Parts of this section may be generated by various options selected above.</p>
+
+            <h3>Install Android Studio</h3>
+            <p><a href="https://developer.android.com/studio/">Install Android Studio.</a></p>
+            <p>This is quite large and may take a while.</p>
+
+            <h3>Create a new project</h3>
+            <p>Create a new project in Android Studio.</p>
+            <ul>
+              <li>Use the "Empty Activity" template</li>
+              <li>Set Name to your app's name, for example "<code>{$options.app.windowTitle}</code>"</li>
+              <li>Set Package name to "<code>org.turbowarp.packager.userland.{$options.app.packageName}</code>"</li>
+              <li>Choose a save location that you won't forget</li>
+              <li>Set Language to "Kotlin"</li>
+              <li>Set Minimum SDK to "API 21: Android 5.0 (Lollipop)"</li>
+            </ul>
+
+            <h3>Create assets folder</h3>
+            <p>In the sidebar on the left, right click on "app", then select "New" > "Folder" > "Assets folder". Use the default settings.</p>
+
+            <h3>Prepare project</h3>
+            <p>
+              <Button on:click={pack} text={'Package the project as a zip'} />
+            </p>
+            <p>Extract the zip and drag its files into "assets" folder you created. (You can directly drag and drop files over the assets folder in Android Studio)</p>
+
+            <h3>Making the app</h3>
+            <p>In the sidebar on the left, navigate to app > src > main > MainActivity. This will open a short Kotlin file.</p>
+            <p>Replace everything after line 2 with the following:</p>
+            <pre>
+              {[
+                'import android.annotation.SuppressLint',
+                'import androidx.appcompat.app.AppCompatActivity',
+                'import android.os.Bundle',
+                'import android.webkit.WebView',
+                '',
+                'class MainActivity : AppCompatActivity() {',
+                '    private lateinit var web: WebView',
+                '',
+                '    @SuppressLint("SetJavaScriptEnabled")',
+                '    override fun onCreate(savedInstanceState: Bundle?) {',
+                '        super.onCreate(savedInstanceState)',
+                '        web = WebView(this)',
+                '        web.settings.javaScriptEnabled = true',
+                '        web.loadUrl("file:///android_asset/index.html")',
+                '        setContentView(web)',
+                '        actionBar?.hide()',
+                '        supportActionBar?.hide()',
+                '    }',
+                '',
+                '    override fun onDestroy() {',
+                '        super.onDestroy()',
+                '        web.destroy()',
+                '    }',
+                '}'
+              ].join('\n')}
+            </pre>
+            <p>Make sure to leave the first line that says <code>package ...</code></p>
+            <p>At this point, you have a functional Android app. However, there are still a few more things you should change.</p>
+
+            <h3>Fixing screen orientation issues</h3>
+            <p>In the sidebar on the left, open app > main > AndroidManifest.xml</p>
+            <p>Find the section that looks like this:</p>
+            <pre>
+              {[
+                '        <activity',
+                '            android:name=".MainActivity"',
+                '            android:exported="true">',
+              ].join('\n')}
+            </pre>
+            <p>And replace it with this:</p>
+            <pre>
+              {[
+                '        <activity',
+                '            android:configChanges="orientation|screenSize"',
+                '            android:screenOrientation="sensor"',
+                '            android:name=".MainActivity"',
+                '            android:exported="true">',
+              ].join('\n')}
+            </pre>
+
+            <h3>Updating colors</h3>
+            <p>Currently the app has a purple color scheme, which may not be what you want. This can be changed.</p>
+            <p>In the sidebar on the left, open app > main > res > values > color.xml.</p>
+            <p>You will see these lines:</p>
+            <pre>
+              {[
+                '    <color name="purple_200">#FFBB86FC</color>',
+                '    <color name="purple_500">#FF6200EE</color>',
+                '    <color name="purple_700">#FF3700B3</color>',
+              ].join('\n')}
+            </pre>
+            <p>Replace those lines with: (the following snippet is generated according to your configured background color)</p>
+            <pre>
+              {[
+                `    <color name="purple_200">#FF${$options.appearance.background.substr(1)}</color>`,
+                `    <color name="purple_500">#FF${$options.appearance.background.substr(1)}</color>`,
+                `    <color name="purple_700">#FF${$options.appearance.background.substr(1)}</color>`,
+              ].join('\n')}
+            </pre>
+            <p>Do not change the other lines.</p>
+            <p>For advanced users, note that these color codes are a bit unusual in that the "alpha" or "transparency" byte (typically <code>255</code> or <code>FF</code>) goes first instead of last.</p>
+            <p>Ignore the bits about <code>purple_yyy</code>; just leave them as is. It would typically be a good idea to rename these colors, but you will be making more work for yourself because you'll have to update some other files to reflect the new names.</p>
+
+            <h3>Updating the project</h3>
+            <p>It's likely that at some point you will want to update the project without redoing this entire guide. Updating a project is much simpler:</p>
+            <ol>
+              <li>Open Android Studio and open the project</li>
+              <li>Delete everything inside the assets folder</li>
+              <li>Re-run the packager</li>
+              <li>Extract the zip and put all of its files into the assets folder</li>
+            </ol>
           {/if}
         {/if}
       </div>
     </Section>
   </div>
 {/if}
-
-{#if projectData.project.analysis.usesSteamworks}
-  <Section
-    accent="#136C9F"
-    reset={() => {
-      resetOptions([
-        'steamworks'
-      ]);
-    }}
-  >
-    <h2>{$_('options.steamworksExtension')}</h2>
-    {#if ['electron-win64', 'electron-linux64', 'electron-mac'].includes($options.target)}
-      <p>{$_('options.steamworksAvailable').replace('{n}', '480')}</p>
-      <label class="option">
-        {$_('options.steamworksAppId')}
-        <input pattern="\d+" minlength="1" bind:value={$options.steamworks.appId}>
-      </label>
-      <label class="option">
-        {$_('options.steamworksOnError')}
-        <select bind:value={$options.steamworks.onError}>
-          <option value="ignore">{$_('options.steamworksIgnore')}</option>
-          <option value="warning">{$_('options.steamworksWarning')}</option>
-          <option value="error">{$_('options.steamworksError')}</option>
-        </select>
-      </label>
-
-      {#if $options.target === 'electron-mac'}
-        <p class="warning">
-          {$_('options.steamworksMacWarning')}
-        </p>
-      {/if}
-    {:else}
-      <p>{$_('options.steamworksUnavailable')}</p>
-      <ul>
-        <li>{$_('options.application-win64').replace('{type}', 'Electron')}</li>
-        <li>
-          {$_('options.application-mac').replace('{type}', 'Electron')}
-          <br>
-          {$_('options.steamworksMacWarning')}
-        </li>
-        <li>{$_('options.application-linux64').replace('{type}', 'Electron')}</li>
-      </ul>
-    {/if}
-
-    <p>
-      <a href="https://extensions.turbowarp.org/steamworks">{$_('options.steamworksDocumentation')}</a>
-    </p>
-  </Section>
-{/if}
-
-<Section>
-  <DropArea on:drop={(e) => importOptionsFromDataTransfer(e.detail)}>
-    <div class="buttons">
-      <div class="button">
-        <Button on:click={exportOptions} secondary text={$_('options.export')} />
-      </div>
-      <div class="button">
-        <Button on:click={importOptions} secondary text={$_('options.import')} />
-      </div>
-      <div class="side-buttons">
-        <Button on:click={resetAll} dangerous text={$_('options.resetAll')} />
-      </div>
-    </div>
-  </DropArea>
-</Section>
 
 <Section>
   <div class="buttons">
@@ -1084,15 +986,22 @@
     <div clas="button">
       <Button on:click={preview} secondary text={$_('options.preview')} />
     </div>
+    <div class="reset-button">
+      <Button on:click={resetAll} dangerous text={$_('options.resetAll')} />
+    </div>
   </div>
 </Section>
 
 {#if result}
-  <Downloads
-    name={result ? result.filename : null}
-    url={result ? result.url : null}
-    blob={result ? result.blob : null}
-  />
+  <Section center>
+    <p>
+      <a href={result.url} download={result.filename}>
+        {$_('options.download')
+          .replace('{filename}', result.filename)
+          .replace('{size}', (result.blob.size / 1000 / 1000).toFixed(2))}
+      </a>
+    </p>
+  </Section>
 {:else if !$progress.visible}
   <Section caption>
     <p>{$_('options.downloadsWillAppearHere')}</p>
