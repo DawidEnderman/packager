@@ -8,19 +8,10 @@
   import SelectTheme from './SelectTheme.svelte';
   import Progress from './Progress.svelte';
   import Modals from './Modals.svelte';
-  import News from './News.svelte';
-  import {progress, theme, error} from './stores';
-  import {isSupported, isSafari, isStandalone, version} from './environment';
-  import {
-    APP_NAME,
-    FEEDBACK_PRIMARY,
-    FEEDBACK_SECONDARY,
-    ACCENT_COLOR,
-    SOURCE_CODE,
-    WEBSITE,
-    DONATE,
-    PRIVACY_POLICY
-  } from '../packager/brand';
+  import {progress, theme} from './stores';
+  import {isSupported, isSafari, isStandalone} from './environment';
+  import version from '../build/version-loader!';
+  import {APP_NAME, FEEDBACK_PRIMARY, FEEDBACK_SECONDARY, ACCENT_COLOR, SOURCE_CODE, WEBSITE} from '../packager/brand';
 
   let projectData;
 
@@ -42,10 +33,7 @@
   const getPackagerOptionsComponent = () => import(
     /* webpackChunkName: "packager-options-ui" */
     './PackagerOptions.svelte'
-  ).catch((err) => {
-    $error = err;
-  });
-
+  );
   // We know for sure we will need this component very soon, so start loading it immediately.
   getPackagerOptionsComponent();
 </script>
@@ -53,8 +41,6 @@
 <style>
   :root {
     font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
-    background: white;
-    color: black;
   }
   :global([theme="dark"]) {
     background: #111;
@@ -98,7 +84,7 @@
   :global([theme="dark"] .is-not-safari select:hover) {
     border-color: #bbb;
   }
-  :global(p), :global(h1), :global(h2), :global(h3) {
+  :global(p), :global(pre), :global(h1), :global(h2), :global(h3) {
     margin: 12px 0;
   }
   :global(summary) {
@@ -116,15 +102,11 @@
   footer > div {
     margin-top: 12px;
   }
+  .footer-spacer {
+    margin: 0 3px;
+  }
   .disclaimer {
     font-style: italic;
-  }
-  .version {
-    font-size: small;
-    opacity: 0.8;
-  }
-  .version a {
-    color: inherit;
   }
 </style>
 
@@ -135,12 +117,7 @@
     <div>
       <h1>{APP_NAME}</h1>
       {#if version}
-        <p class="version">
-          {version}
-          {#if isStandalone}
-            - <a href={WEBSITE}>{WEBSITE}</a>
-          {/if}
-        </p>
+        <p><i>{version}</i> - <a href={WEBSITE}>Online version</a></p>
       {/if}
       <p>{$_('p4.description1')}</p>
       <p>
@@ -176,23 +153,19 @@
     </div>
   </Section>
 
-  {#if !isStandalone}
-    <News />
-  {/if}
-
   {#if isSupported}
     <SelectProject bind:projectData />
   {:else}
     <Section accent="#4C97FF">
-      <h2>{$_('p4.browserNotSupported')}</h2>
-      <p>{$_('p4.browserNotSupportedDescription')}</p>
+      <h2>Browser not supported</h2>
+      <p>Please update your browser to use this site.</p>
     </Section>
   {/if}
 
   {#if projectData}
     {#await getPackagerOptionsComponent()}
       <Section center>
-        <Progress text={$_('p4.importingInterface')} />
+        <Progress text="Loading interface..." />
       </Section>
     {:then { default: PackagerOptions }}
       <div in:fade>
@@ -203,9 +176,7 @@
       </div>
     {:catch}
       <Section center>
-        <p>
-          {$_('p4.unknownImportError')}
-        </p>
+        Something went wrong, please refresh and try again.
       </Section>
     {/await}
   {/if}
@@ -218,25 +189,19 @@
 
   <footer>
     <div>
-      {#if PRIVACY_POLICY && !isStandalone}
-        <a href={PRIVACY_POLICY}>{$_('p4.privacy')}</a>
-        <span> - </span>
+      {#if !isStandalone}
+        <a href="privacy.html">{$_('p4.privacy')}</a>
+        <span class="footer-spacer">-</span>
       {/if}
       <a href={FEEDBACK_PRIMARY.link}>{$_('p4.feedback')}</a>
-      {#if SOURCE_CODE}
-        <span> - </span>
-        <a href={SOURCE_CODE}>{$_('p4.sourceCode')}</a>
-      {/if}
-      {#if DONATE}
-        <!-- Donation link needs to be wrapped in another element so we can hide it in the Mac App Store -->
-        <span class="donate-link">
-          <span> - </span>
-          <a href={DONATE}>{$_('p4.donate')}</a>
-        </span>
-      {/if}
+      <span class="footer-spacer">-</span>
+      <a href={SOURCE_CODE}>{$_('p4.sourceCode')}</a>
     </div>
     <div>
       <a href="https://docs.turbowarp.org/packager">{$_('p4.documentation')}</a>
+    </div>
+    <div>
+      <a href="https://fosshost.org/">{$_('p4.fosshost')}</a>
     </div>
     <div>
       <SelectTheme />
